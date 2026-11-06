@@ -1,0 +1,58 @@
+# Both graph databases, side by side, so the same road network can be loaded
+# into each and the query models compared.
+#
+#   docker compose up -d
+#   docker compose logs -f neo4j     # first start pulls the GDS plugin
+#
+# Neo4j browser:  http://localhost:7474   (neo4j / mapfunmapfun)
+# Postgres/AGE:   psql -h localhost -p 5433 -U mapfun -d mapfun
+
+services:
+  neo4j:
+    image: neo4j:5.26-community
+    container_name: mapfun-neo4j
+    ports:
+      - "7474:7474" # HTTP browser
+      - "7687:7687" # Bolt -- this is the port the Scala driver connects to
+    environment:
+      NEO4J_AUTH: neo4j/mapfunmapfun
+      # The Graph Data Science library ships Dijkstra, A*, Yen, PageRank,
+      # Louvain and friends as stored procedures. Downloaded on first boot.
+      NEO4J_PLUGINS: '["graph-data-science"]'
+      NEO4J_dbms_security_procedures_unrestricted: "gds.*"
+      NEO4J_dbms_security_procedures_allowlist: "gds.*"
+      NEO4J_server_memory_heap_initial__size: 1G
+      NEO4J_server_memory_heap_max__size: 2G
+      NEO4J_server_memory_pagecache_size: 1G
+    volumes:
+      - neo4j-data:/data
+      - ./data:/import:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  age:
+    # AGE tags encode both the Postgres major and the AGE release; there is no
+    # rolling "PG16" tag. Check hub.docker.com/r/apache/age/tags before bumping.
+    image: apache/age:release_PG16_1.6.0
+    container_name: mapfun-age
+    # 5433 so this never collides with a Postgres already running on 5432.
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: mapfun
+      POSTGRES_PASSWORD: mapfun
+      POSTGRES_DB: mapfun
+    volumes:
+      - age-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mapfun -d mapfun"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  neo4j-data:
+  age-data:

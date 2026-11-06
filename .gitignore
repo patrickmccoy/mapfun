@@ -1,0 +1,17 @@
+target/
+project/target/
+project/project/
+.bsp/
+.bloop/
+.metals/
+.scala-build/
+.idea/
+.vscode/
+
+# OSM extracts are large binaries -- fetch them with scripts/fetch-osm.sh
+data/*.osm.pbf
+data/*.osm
+data/*.geojson
+out/
+*.log
+.DS_Store
