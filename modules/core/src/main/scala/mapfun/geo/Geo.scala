@@ -225,9 +225,11 @@ final class GridIndex private (
 
   /** Nearest node by great-circle distance.
     *
-    * Searches rings of cells outward from the query point and stops one ring
-    * after the first hit -- the extra ring is necessary because a node in a
-    * diagonal cell can still be closer than one found in the current ring.
+    * Searches rings of cells outward from the query point and stops once
+    * nothing outside the scanned block can beat the best hit so far. A fixed
+    * "one more ring" rule is not enough: cells are equal in degrees, not
+    * metres, so a cell can be many times wider than it is tall, and the nearest
+    * node can sit several rings out along the short axis.
     */
   def nearest(point: LatLon): NodeId =
     if positions.isEmpty then NoNode
@@ -238,10 +240,8 @@ final class GridIndex private (
       var bestDist = Double.PositiveInfinity
       var ring = 0
       val maxRing = math.max(rows, cols)
-      var ringsSinceHit = -1
 
-      while ring <= maxRing && ringsSinceHit < 1 do
-        var found = false
+      while ring <= maxRing && !(best != NoNode && bestDist <= unscannedLowerBound(point, r0, c0, ring)) do
         var r = r0 - ring
         while r <= r0 + ring do
           if r >= 0 && r < rows then
@@ -260,14 +260,41 @@ final class GridIndex private (
                   if d < bestDist then
                     bestDist = d
                     best = node
-                    found = true
                   i += 1
               c += 1
           r += 1
-        if best != NoNode then ringsSinceHit = if found then 0 else ringsSinceHit + 1
         ring += 1
 
       best
+
+  /** A lower bound, in metres, on the distance from `point` to any node in a
+    * cell outside the block of rings `0 until ring` around (r0, c0).
+    *
+    * Such a node is either beyond the block's north/south edge -- at least that
+    * latitude gap away, since a great circle can't beat the meridian -- or
+    * beyond its east/west edge. For a longitude gap g, haversine gives
+    * hav(d) >= cos(lat1) cos(lat2) hav(g), so using the highest latitude in play
+    * keeps the bound safe. A side where the block already reaches the edge of
+    * the grid has nothing beyond it.
+    */
+  private def unscannedLowerBound(point: LatLon, r0: Int, c0: Int, ring: Int): Double =
+    val k = ring - 1 // the outermost ring scanned so far
+    val inf = Double.PositiveInfinity
+    val south = if r0 - k <= 0 then inf else point.lat - (minLat + (r0 - k) * cellLat)
+    val north = if r0 + k >= rows - 1 then inf else minLat + (r0 + k + 1) * cellLat - point.lat
+    val west  = if c0 - k <= 0 then inf else point.lon - (minLon + (c0 - k) * cellLon)
+    val east  = if c0 + k >= cols - 1 then inf else minLon + (c0 + k + 1) * cellLon - point.lon
+
+    val latGap = math.max(0.0, math.min(south, north))
+    val lonGap = math.max(0.0, math.min(west, east))
+    val latBound = if latGap.isInfinite then inf else math.toRadians(latGap) * Geo.EarthRadiusMetres
+    val lonBound =
+      if lonGap.isInfinite then inf
+      else
+        val maxAbsLat = math.max(math.abs(point.lat), math.max(math.abs(minLat), math.abs(minLat + rows * cellLat)))
+        val g = math.min(math.Pi, math.toRadians(lonGap))
+        2 * Geo.EarthRadiusMetres * math.asin(math.min(1.0, math.cos(math.toRadians(maxAbsLat)) * math.sin(g / 2)))
+    math.min(latBound, lonBound)
 
 object GridIndex:
 

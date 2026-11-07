@@ -75,6 +75,21 @@ class GeoSuite extends FunSuite:
       )
   }
 
+  test("grid index matches a linear scan when cells are far from square in metres") {
+    // A tall, thin strip: each cell is ~100x taller than it is wide, so the
+    // nearest node is often several columns over in the same row -- well past
+    // "one ring after the first hit".
+    val rng = scala.util.Random(7)
+    val positions = IndexedSeq.fill(2500)(LatLon(rng.nextDouble(), rng.nextDouble() * 0.01))
+    val index = GridIndex(positions)
+
+    for _ <- 0 until 500 do
+      val query = LatLon(rng.nextDouble() * 1.2 - 0.1, rng.nextDouble() * 0.012 - 0.001)
+      val viaIndex = index.nearest(query)
+      val best = positions.map(Haversine.distance(query, _)).min
+      assertEqualsDouble(Haversine.distance(query, positions(viaIndex)), best, 1e-6, s"query $query")
+  }
+
   test("grid index handles queries outside the bounding box") {
     val geo = Generators.grid(10, 10)
     val far = LatLon(0.0, 0.0)
