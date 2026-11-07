@@ -19,6 +19,11 @@ sbt "cli/run route --pbf data/monaco-latest.osm.pbf --out out/monaco.geojson"
 Drop the resulting `.geojson` on <https://geojson.io> to see the route on a real
 map.
 
+History note: mapfun was developed locally with Claude Code as a pair-programmer
+and imported here as a single commit. The algorithm choices, data structures and
+tests are mine to explain. I built it to learn this material properly, and the
+comments document why each piece works the way it does.
+
 ---
 
 ## Layout
