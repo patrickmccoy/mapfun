@@ -5,6 +5,7 @@ import cats.syntax.all.*
 import com.monovore.decline.*
 import com.monovore.decline.effect.CommandIOApp
 
+import mapfun.geo.GeoGraph
 import mapfun.osm.{OsmImporter, TravelProfile, CostModel}
 import mapfun.neo4j.{Neo4jConfig, Neo4jStore, GraphDataScience}
 import mapfun.age.{AgeConfig, AgeStore, RecursiveCte}
@@ -70,6 +71,13 @@ object Main
     .option[Int]("limit", "Cap the graph to this many junctions before loading. Default 20000.")
     .withDefault(20000)
 
+  /** The slice of an import that the `load-*` commands store: the first `n`
+    * junction ids. Everything that later compares against a database has to
+    * rebuild the same slice, or it is comparing two different graphs.
+    */
+  private def firstJunctions(geo: GeoGraph, n: Int): GeoGraph =
+    if geo.numNodes > n then geo.filter(_ < n) else geo
+
   // ---- subcommands ---------------------------------------------------------
 
   private val demo = Opts.subcommand("demo", "Run the algorithm tour on synthetic graphs.") {
@@ -114,7 +122,7 @@ object Main
   private val loadNeo4j = Opts.subcommand("load-neo4j", "Import an extract into Neo4j.") {
     (pbfOpt, profileOpt, costOpt, limitOpt, neo4jConfig).mapN { (pbf, profile, cost, limit, config) =>
       val (full, stats) = OsmImporter.load(pbf, profile, cost)
-      val geo = if full.numNodes > limit then full.filter(_ < limit) else full
+      val geo = firstJunctions(full, limit)
       Neo4jStore.resource(config).use { store =>
         for
           _ <- IO.println(stats.toString)
@@ -152,7 +160,7 @@ object Main
           _ <- IO.println(s"within 3 hops of $from: ${reach.length} junctions")
           hops <- store.shortestPathByHops(from, to)
           _ <- IO.println(s"fewest-hops path $from -> $to: ${hops.map(_.mkString(" -> ")).getOrElse("none")}")
-          _ <- IO.whenA(gds)(runGds(config, from, to, pbf, profile, cost))
+          _ <- IO.whenA(gds)(runGds(config, from, to, pbf, profile, cost, loaded = n))
         yield ()
       }
     }
@@ -164,7 +172,8 @@ object Main
       to: Long,
       pbf: Option[String],
       profile: TravelProfile,
-      cost: CostModel
+      cost: CostModel,
+      loaded: Int
   ): IO[Unit] =
     GraphDataScience.resource(config).use { gds =>
       for
@@ -179,7 +188,7 @@ object Main
         _ <- IO.println(s"gds Yen k=3:  ${y.map(p => f"${p._1}%.1f").mkString(", ")}")
         b <- gds.betweenness(limit = 5)
         _ <- IO.println("most central junctions: " + b.map((id, s) => f"$id ($s%.0f)").mkString(", "))
-        _ <- pbf.traverse_(p => crossCheck(p, profile, cost, from, to, d.map(_._1)))
+        _ <- pbf.traverse_(p => crossCheck(p, profile, cost, loaded, from, to, d.map(_._1)))
       yield ()
     }
 
@@ -190,18 +199,35 @@ object Main
     * graph build, the search, the Bolt load and the GDS projection at once, and
     * two completely independent implementations have to land on the same number.
     * Only meaningful when the same `--profile` and `--cost` were used to load.
+    *
+    * `load-neo4j` stores only the first `--limit` junctions, so the full
+    * re-import is cut down to the same `loaded` count first. Comparing against
+    * the whole graph would check two different networks and report a mismatch
+    * that has nothing to do with either implementation.
     */
   private def crossCheck(
       pbf: String,
       profile: TravelProfile,
       cost: CostModel,
+      loaded: Int,
       from: Long,
       to: Long,
       gdsCost: Option[Double]
   ): IO[Unit] = IO {
-    val (geo, _) = OsmImporter.load(pbf, profile, cost, verbose = false)
-    val local = mapfun.algo.Dijkstra.shortestPath(geo.graph, from.toInt, to.toInt)
+    val (full, _) = OsmImporter.load(pbf, profile, cost, verbose = false)
+    val geo = firstJunctions(full, loaded)
     println("\n-- core vs GDS --")
+    if full.numNodes < loaded then
+      println(s"  the database holds $loaded junctions but this extract only produces ${full.numNodes}:")
+      println("  it was loaded from a different --pbf, --profile or --cost, so there is nothing to compare")
+    else if from < 0 || to < 0 || from >= geo.numNodes || to >= geo.numNodes then
+      println(s"  --from/--to must be junction ids below ${geo.numNodes}")
+    else
+      compareWithGds(geo, from.toInt, to.toInt, gdsCost)
+  }
+
+  private def compareWithGds(geo: GeoGraph, from: Int, to: Int, gdsCost: Option[Double]): Unit =
+    val local = mapfun.algo.Dijkstra.shortestPath(geo.graph, from, to)
     println(f"  core Dijkstra: ${local.cost}%.3f  (settled ${local.settled})")
     gdsCost match
       case Some(remote) =>
@@ -210,8 +236,11 @@ object Main
         println(s"  they agree: $agree")
         if !agree then
           println("  (if this is false, the database was loaded with a different --profile/--cost)")
-      case None => println("  gds returned no path")
-  }
+      case None =>
+        // The loaded slice is an id prefix, not a strongly connected region,
+        // so "no path" is a real answer here, and core should agree.
+        println("  gds returned no path")
+        println(s"  core ${if !local.found then "agrees" else "found one, so they disagree"}")
 
   private def describe(r: Option[(Double, List[Long])]): String =
     r.fold("no path")((cost, nodes) => f"cost $cost%.1f over ${nodes.length} junctions")
@@ -223,7 +252,7 @@ object Main
         // AGE's write path is much slower than Neo4j's, so default to a
         // smaller slice unless the user asks for more.
         val cap = math.min(limit, 5000)
-        val geo = if full.numNodes > cap then full.filter(_ < cap) else full
+        val geo = firstJunctions(full, cap)
         println(stats)
         println(s"loading ${geo.numNodes} junctions into AGE at ${config.url}")
 
