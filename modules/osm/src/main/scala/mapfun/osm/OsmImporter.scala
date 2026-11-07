@@ -284,12 +284,9 @@ private final class WayPass(
               i += 1
 
             val (forward, backward) = onewayFlags(tags, profile)
-            val speed = tags
-              .get("maxspeed")
-              .flatMap(parseMaxSpeed)
-              .getOrElse(profile.speedMps(rc))
+            val speed = profile.speedMps(rc, tags.get("maxspeed").flatMap(parseMaxSpeed))
 
-            onWay(RawWay(refs, rc, forward, backward, math.max(0.5, speed)))
+            onWay(RawWay(refs, rc, forward, backward, speed))
         case _ => ()
     }
 

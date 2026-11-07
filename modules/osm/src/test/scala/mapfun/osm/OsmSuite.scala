@@ -98,6 +98,27 @@ class RoadClassSuite extends FunSuite:
     }
   }
 
+  test("posted maxspeed never pushes a way above the profile's max speed") {
+    val kph = (v: Double) => v * 1000.0 / 3600.0
+    TravelProfile.values.foreach { p =>
+      p.allowed.foreach { rc =>
+        Seq(None, Some(kph(5)), Some(kph(50)), Some(kph(130)), Some(kph(200))).foreach { posted =>
+          val s = p.speedMps(rc, posted)
+          assert(s <= p.maxSpeedMps + 1e-9, s"$p on $rc with $posted travels $s")
+        }
+      }
+    }
+  }
+
+  test("posted maxspeed sets car speed, caps cyclists, and is ignored on foot") {
+    val kph = (v: Double) => v * 1000.0 / 3600.0
+    val rc  = RoadClass.Residential
+    assertEqualsDouble(TravelProfile.Car.speedMps(rc, Some(kph(50))), kph(50), 1e-9)
+    assertEqualsDouble(TravelProfile.Foot.speedMps(rc, Some(kph(50))), 1.4, 1e-9)
+    assertEqualsDouble(TravelProfile.Bike.speedMps(rc, Some(kph(50))), 4.5, 1e-9)
+    assertEqualsDouble(TravelProfile.Bike.speedMps(rc, Some(kph(10))), kph(10), 1e-9)
+  }
+
   test("pedestrians ignore one-way restrictions") {
     assert(!TravelProfile.Foot.respectOneway)
     assert(TravelProfile.Car.respectOneway)

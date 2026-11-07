@@ -69,6 +69,21 @@ enum TravelProfile(val allowed: Set[RoadClass], val respectOneway: Boolean):
     case Foot => 1.4 // ~5 km/h
     case Bike => math.min(rc.metresPerSecond, 4.5) // ~16 km/h
 
+  /** Speed on one way, given its parsed `maxspeed` tag if it has one.
+    *
+    * A posted limit is a motor-vehicle limit: it sets a car's speed but only
+    * ever slows a cyclist down, and a pedestrian ignores it. The result is
+    * clamped to [[maxSpeedMps]] because the A* heuristic divides by that --
+    * one 130 km/h motorway tag above the cap would make it overestimate and
+    * quietly return non-optimal routes.
+    */
+  def speedMps(rc: RoadClass, postedMps: Option[Double]): Double =
+    val raw = this match
+      case Car  => postedMps.getOrElse(speedMps(rc))
+      case Foot => speedMps(rc)
+      case Bike => postedMps.fold(speedMps(rc))(math.min(_, speedMps(rc)))
+    math.min(math.max(0.5, raw), maxSpeedMps)
+
   /** Fastest possible movement anywhere in this profile's network.
     *
     * A* needs this to convert a straight-line distance into an admissible
