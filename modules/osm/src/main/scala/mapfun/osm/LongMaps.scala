@@ -1,5 +1,21 @@
 package mapfun.osm
 
+/** Fibonacci hashing shared by the maps below: multiply by 2^64/phi and keep
+  * the top log2(capacity) bits. Cheap, and it scrambles the sequential-ish node
+  * ids OSM hands out far better than a plain mask would.
+  *
+  * The shift has to track the capacity. A fixed shift keeps a fixed number of
+  * bits, and once the table outgrows them every key lands in the bottom slots
+  * and linear probing collapses.
+  */
+private[osm] object LongHash:
+  inline def slot(key: Long, shift: Int): Int =
+    ((key * 0x9e3779b97f4a7c15L) >>> shift).toInt
+
+  def shiftFor(capacity: Int): Int =
+    require(Integer.bitCount(capacity) == 1, s"capacity $capacity is not a power of two")
+    64 - Integer.numberOfTrailingZeros(capacity)
+
 /** Open-addressing hash map from `Long` keys to `Int` values.
   *
   * Written by hand rather than using `java.util.HashMap[java.lang.Long, Integer]`
@@ -17,6 +33,7 @@ final class LongIntMap(initialCapacity: Int = 1 << 16):
 
   private var capacity = Integer.highestOneBit(math.max(16, initialCapacity) * 2)
   private var mask = capacity - 1
+  private var shift = LongHash.shiftFor(capacity)
   private var keys = new Array[Long](capacity)
   private var values = new Array[Int](capacity)
   private var count = 0
@@ -24,12 +41,7 @@ final class LongIntMap(initialCapacity: Int = 1 << 16):
 
   def size: Int = count
 
-  /** Fibonacci hashing: multiply by 2^64/phi and take the high bits. Cheap, and
-    * it scrambles the sequential-ish node ids OSM hands out far better than a
-    * plain mask would.
-    */
-  private inline def slotFor(key: Long): Int =
-    ((key * 0x9e3779b97f4a7c15L) >>> 40).toInt & mask
+  private inline def slotFor(key: Long): Int = LongHash.slot(key, shift)
 
   private def indexOf(key: Long): Int =
     var i = slotFor(key)
@@ -78,6 +90,7 @@ final class LongIntMap(initialCapacity: Int = 1 << 16):
     val oldValues = values
     capacity <<= 1
     mask = capacity - 1
+    shift = LongHash.shiftFor(capacity)
     threshold = (capacity * 0.65).toInt
     keys = new Array[Long](capacity)
     values = new Array[Int](capacity)
@@ -105,6 +118,7 @@ final class LongCoordMap(initialCapacity: Int = 1 << 16):
 
   private var capacity = Integer.highestOneBit(math.max(16, initialCapacity) * 2)
   private var mask = capacity - 1
+  private var shift = LongHash.shiftFor(capacity)
   private var keys = new Array[Long](capacity)
   private var packed = new Array[Long](capacity)
   private var count = 0
@@ -112,8 +126,7 @@ final class LongCoordMap(initialCapacity: Int = 1 << 16):
 
   def size: Int = count
 
-  private inline def slotFor(key: Long): Int =
-    ((key * 0x9e3779b97f4a7c15L) >>> 40).toInt & mask
+  private inline def slotFor(key: Long): Int = LongHash.slot(key, shift)
 
   private def indexOf(key: Long): Int =
     var i = slotFor(key)
@@ -142,6 +155,7 @@ final class LongCoordMap(initialCapacity: Int = 1 << 16):
     val oldPacked = packed
     capacity <<= 1
     mask = capacity - 1
+    shift = LongHash.shiftFor(capacity)
     threshold = (capacity * 0.65).toInt
     keys = new Array[Long](capacity)
     packed = new Array[Long](capacity)

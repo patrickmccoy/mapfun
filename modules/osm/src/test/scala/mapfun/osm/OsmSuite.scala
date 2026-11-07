@@ -34,6 +34,17 @@ class LongMapSuite extends FunSuite:
     (1 to n).foreach(i => assertEquals(m.getOrElse(4200000000L + i * 7, -1), i, s"entry $i"))
   }
 
+  test("hash slots spread over the whole table at every capacity, not just the first 2^24") {
+    // Sequential ids, like the ones OSM hands out within an extract.
+    Seq(1 << 4, 1 << 16, 1 << 24, 1 << 26, 1 << 30).foreach { capacity =>
+      val shift = LongHash.shiftFor(capacity)
+      val slots = (1L to 100_000L).map(id => LongHash.slot(id + 5_000_000_000L, shift))
+      assert(slots.forall(s => s >= 0 && s < capacity), s"capacity $capacity: slot out of range")
+      // A fixed 24-bit hash never reaches the upper half of a 2^26 table.
+      assert(slots.exists(_ >= capacity / 2), s"capacity $capacity: upper half never used")
+    }
+  }
+
   test("LongIntMap iterates exactly its entries") {
     val m = LongIntMap(16)
     (1 to 1000).foreach(i => m.put(i.toLong, i * 2))
