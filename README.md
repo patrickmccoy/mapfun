@@ -10,7 +10,7 @@ it is built the way it is — because the interesting part of routing is not the
 pseudocode, it is the handful of decisions that make it work on real data.
 
 ```
-sbt test                    # 87 tests, no setup required
+sbt test                    # 91 tests, no setup required
 sbt "cli/run demo"          # algorithm tour on synthetic graphs
 ./scripts/fetch-osm.sh monaco
 sbt "cli/run route --pbf data/monaco-latest.osm.pbf --out out/monaco.geojson"
