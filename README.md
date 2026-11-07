@@ -262,3 +262,7 @@ containers.
   general.
 - The database `load` commands cap the graph size by default (`--limit`), since
   pushing a million junctions over Bolt is not the lesson.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

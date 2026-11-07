@@ -7,6 +7,7 @@
 ThisBuild / scalaVersion := "3.3.8"
 ThisBuild / organization := "fun.map"
 ThisBuild / version      := "0.1.0-SNAPSHOT"
+ThisBuild / licenses     := Seq(License.MIT)
 
 ThisBuild / scalacOptions ++= Seq(
   "-deprecation",
